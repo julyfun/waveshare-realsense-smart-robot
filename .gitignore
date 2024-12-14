@@ -1,0 +1,17 @@
+.vscode
+.DS_Store
+.nvimlog
+*.swp
+.zed
+__pycache__
+
+# [nn]
+*.pt
+*.onnx
+
+# [special]
+/cali
+/docker_ros
+/docker2
+/outputs
+*.whl

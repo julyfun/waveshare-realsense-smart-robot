@@ -1,0 +1,11 @@
+Build a python fastapi app and `uvicorn.run()` in the script using 0.0.0.0:4060.
+
+the `/move` route:
+
+- Receive 3 floats (use pydantic)
+- Do something like `ros2 service call /move_point_cmd roarm_moveit/srv/MovePointCmd {"x: 0.2, y: 0, z: 0"}`
+
+the `/grip` route:
+
+- Receive 1 float.
+- Do something like `ros2 topic pub /gripper_cmd std_msgs/msg/Float32 "{data: 0.2}" -1`

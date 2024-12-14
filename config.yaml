@@ -1,0 +1,12 @@
+defaults:
+  - override hydra/job_logging: disabled
+
+serial_number: "1a86_USB_Serial"
+
+ttf_server:
+  port: 4050
+
+catch:
+  labels: ["cat", "teddy bear"]
+  area_min_limit: 0.6
+  dev: "135122074193"

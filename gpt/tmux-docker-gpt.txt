@@ -1,0 +1,19 @@
+A tmux command to start 3 windows.
+
+Show three window at the same time.
+
+First window:
+
+```
+docker start 7f
+docker exec -u julyfun -it 7f bash
+echo 1234321 | sudo -S chmod 666 /dev/ttyUSB0 # serial
+ros2 run roarm_driver roarm_driver
+```
+
+Second window:
+
+```
+docker exec -u julyfun -it 7f bash
+ros2 launch roarm_moveit interact.launch.py
+```

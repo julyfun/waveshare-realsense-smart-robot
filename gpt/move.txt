@@ -1,0 +1,37 @@
+ros2 topic list got these topic:
+
+```
+/hand_controller/controller_state
+/hand_controller/joint_trajectory
+/hand_controller/state
+/hand_controller/transition_event
+/hand_pose
+/head_mount_kinect/depth_registered/camera_info
+/head_mount_kinect/depth_registered/image_raw
+/initialpose
+/joint_state_broadcaster/transition_event
+/joint_states
+/model_depth
+/monitored_planning_scene
+/motion_plan_request
+/parameter_events
+/planning_scene
+/planning_scene_world
+/recognized_object_array
+/robot_description
+/robot_description_semantic
+/rosout
+/rviz_moveit_motion_planning_display/robot_interaction_interactive_marker_topic/feedback
+/rviz_moveit_motion_planning_display/robot_interaction_interactive_marker_topic/update
+/tf
+/tf_static
+/trajectory_execution_event
+```
+
+In python ros2, make a target joint state with:
+
+'base_link_to_link1': 0
+'link1_to_link2',0.1
+'link2_to_link3',1.0
+
+and send the target to some topic to make it move.
