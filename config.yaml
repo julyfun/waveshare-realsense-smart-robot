@@ -7,6 +7,11 @@ ttf_server:
   port: 4050
 
 catch:
-  labels: ["cat", "teddy bear"]
+  labels: ["bottle", "airplane"]
   area_min_limit: 0.6
   dev: "135122074193"
+  move_time_interval: 1.2
+  compensate:
+    x: 0.0
+    y: 0.0
+    z: 0.00

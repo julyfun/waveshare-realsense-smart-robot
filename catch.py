@@ -6,6 +6,7 @@ from ultralytics import YOLO
 from fast_math.kalman.linear_kalman import LinearKalmanAliveApi
 from omegaconf import DictConfig
 import hydra
+import time
 from loguru import logger
 
 @hydra.main(version_base=None, config_path=".", config_name="config")
@@ -25,11 +26,18 @@ def main(cfg: DictConfig):
 
     # [yolo]
     print('model')
-    model = YOLO('yolov8l-seg.pt')
+    model = YOLO('yolov8m-seg.pt')
 
     # [kalman]
-    kalman = LinearKalmanAliveApi(3, 2, 0.1, 10.0, 500.0)
+    kalman = LinearKalmanAliveApi(3, 2, 0.1, 10.0, 5.0)
     print('loop')
+
+    # [catch_test]
+    catch_test_last_move = -10086.666
+
+    # [cache]
+    cache_cpst_z = None
+    state_grip = "close"
 
     try:
         while True:
@@ -94,16 +102,18 @@ def main(cfg: DictConfig):
 
                 so_obs = fn()
 
+                # not used
                 kalman.update(img_time, so_obs)
                 so_xyz = kalman.get_pos(img_time)
 
                 try:
+                    print(so_obs)
                     def fn():
                         url = "http://localhost:4060/pub-tf2"
                         data = {
                             "frame_id": "rs_arm",
                             "child_frame_id": "obj",
-                            "xyz": so_xyz.tolist(),
+                            "xyz": so_obs.tolist(),
                             "xyzw": [0.0, 0.0, 0.0, 1.0]
                         }
 
@@ -111,7 +121,10 @@ def main(cfg: DictConfig):
 
                     fn()
 
-                    def fn(tar, src):
+                    if kalman.dead(img_time):
+                        raise Exception("Kalman dead")
+
+                    def tf2(tar, src):
                         url = "http://localhost:4060/get-tf2"
                         data = {
                             "frame_id": tar,
@@ -121,28 +134,64 @@ def main(cfg: DictConfig):
                         response = requests.post(url, json=data)
                         data = response.json()
                         if data["status"] == "success":
-                            xyz = data["xyz"]
-                            xyzw = data["xyzw"]
-                            print("Translation (xyz):", xyz, type(xyz))
+                            xyz = np.array(data["xyz"])
+                            xyzw = np.array(data["xyzw"])
                             return xyz, xyzw
                         else:
                             print("Error:", data["message"])
+                            return None
 
-                    obj_xyz, _ = fn("base_link", "obj")
-                    logger.info(f'z: {obj_xyz[2]}')
+                    if cache_cpst_z is None:
+                        cache_cpst_z = tf2("base_link", "link2")[0][2]
+                    obj_xyz_in_link2 = tf2("base_link", "obj")[0] - np.array([0.0, 0.0, cache_cpst_z])
+                    logger.info(f'z: {obj_xyz_in_link2[2]}')
 
-                    def fn():
-                        url = "http://localhost:4060/move-v2"
+                    def grip(x):
+                        url = "http://localhost:4060/grip"
                         data = {
-                            "x": 0.0,
-                            "y": -0.2,
-                            "z": float(np.clip(obj_xyz[2], 0.05, 0.35)),
+                            "data": x,
                         }
                         response = requests.post(url, json=data)
+
+                    def fn():
+                        cp = cfg.catch.compensate
+                        xyz_cp = obj_xyz_in_link2 + np.array([cp.x, cp.y, cp.z])
+
+                        xy_proj = xyz_cp[:2] # tmp
+                        exp_norm = np.clip(np.linalg.norm(xy_proj) - 0.03, 0.1, 0.50) # tmp
+                        so_xy = xy_proj / np.linalg.norm(xy_proj) * exp_norm
+
+                        send_xyz = np.array([so_xy[0], so_xy[1], np.clip(xyz_cp[2], 0.0, 0.35)])
+                        print(f'send_xyz: {send_xyz}')
+
+                        url = "http://localhost:4060/move"
+                        data = {
+                            "x": send_xyz[0],
+                            "y": send_xyz[1],
+                            "z": send_xyz[2],
+                        }
+                        # this service gonna make base_link to hand_tcp to (x, y, z + cpst_z)
+                        response = requests.post(url, json=data)
+
+                        cur_xyz_in_link2 = tf2("base_link", "hand_tcp")[0] - np.array([0.0, 0.0, cache_cpst_z])
+
+                        if np.linalg.norm(cur_xyz_in_link2 - xyz_cp) < 0.10:
+                            # grip
+                            if state_grip == "close":
+                                grip(3.0)
+                                state_grip = "open"
+                        else:
+                            if state_grip == "open":
+                                grip(0.0)
+                                state_grip = "close"
+
                         data = response.json()
                         print(data)
 
-                    fn()
+                    if img_time - catch_test_last_move > cfg.catch.move_time_interval:
+                        fn()
+                        catch_test_last_move = img_time
+
                 except Exception as e:
                     logger.error(e)
 
