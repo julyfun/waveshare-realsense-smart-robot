@@ -4,14 +4,17 @@
 *.swp
 .zed
 __pycache__
+.hydra
 
 # [nn]
 *.pt
 *.onnx
+*.whl
 
 # [special]
 /cali
 /docker_ros
 /docker2
 /outputs
-*.whl
+/docker_mnt*
+
