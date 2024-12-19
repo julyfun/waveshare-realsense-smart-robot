@@ -10,8 +10,45 @@ catch:
   labels: ["bottle", "airplane"]
   area_min_limit: 0.6
   dev: "135122074193"
-  move_time_interval: 1.1
-  compensate:
-    x: 0.0
-    y: 0.0
-    z: 0.00
+  run_time_interval: 0.02
+  req_time_interval: 0.05
+  error:
+    xyz: 0.02
+    q_degree: 1.5
+
+  position:
+    time: 1.2
+  # get_ready:
+  #   time: 1.5
+  #   degree: 100
+  reach:
+    offset: # from obj to tcp you should go
+      xy: 0.01
+      left: 0.03
+      z: -0.01
+    clip:
+      xy:
+        min: 0.05
+        max: 0.45
+      z:
+        min: 0.10
+        max: 0.35
+    timeout: 4.0
+
+  catch:
+    time: 2.0
+    degree: 1.0
+  to_box:
+    # xyz: [-0.2, 0.0, 0.25]?
+    q_degree: [179.9, 20.0, 135.0]
+    delay: 1.0
+  release:
+    time: 1.5
+    degree: 100
+  init:
+    gripper_degree: 1.0
+    q_degree: [0.0, 40.0, 135.0]
+
+person:
+  labels: ["person"]
+  area_min_limit: 0.6
