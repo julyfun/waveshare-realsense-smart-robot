@@ -72,7 +72,7 @@ class Find(State):
         result = ctx.object_tracker.wait_for_track_one_xyz(
             ctx.cfg.catch.labels,
             ctx.cfg.catch.area_min_limit,
-            want_img=True
+            want_img=ctx.cfg.catch.want_img
         )
 
         if result is None:
@@ -98,7 +98,7 @@ class Position(State):
         result = ctx.object_tracker.wait_for_track_one_xyz(
             ctx.cfg.catch.labels,
             ctx.cfg.catch.area_min_limit,
-            want_img=True
+            want_img=ctx.cfg.catch.want_img
         )
         if result is None:
             print('result in None, maybe failed to get img')
@@ -258,7 +258,7 @@ class Context():
     def __init__(self, cfg):
         self.state = Init()
         self.cfg = cfg
-        self.object_tracker = ObjectTracker(480, 640, 30, None, model_name='yolov11m-seg.pt')
+        self.object_tracker = ObjectTracker(480, 640, 30, cfg.catch.dev, model_name='best.pt')
 
         self.next_run_time_sys = -1e9
 

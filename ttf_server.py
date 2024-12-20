@@ -31,6 +31,7 @@ class MyApp:
                 c.tick
             )
             print(packed)
+            print(c.vx, c.vw)
             with serial.Serial(self.device_path, baudrate=115200, timeout=1) as ser:
                 ser.write(packed)
             return {"message": "ok"}
