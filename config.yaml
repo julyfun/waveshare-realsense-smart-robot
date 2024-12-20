@@ -13,37 +13,39 @@ catch:
   run_time_interval: 0.02
   req_time_interval: 0.05
   error:
-    xyz: 0.02
+    dis: 0.02
     q_degree: 1.5
 
   position:
-    time: 1.2
-  # get_ready:
-  #   time: 1.5
-  #   degree: 100
+    delay: 1.2
+
   reach:
-    offset: # from obj to tcp you should go
-      xy: 0.01
-      left: 0.03
+    offset: # from observation to tcp you should go
+      dis: 0.05
+      left: 0.015
       z: -0.01
     clip:
-      xy:
+      dis:
         min: 0.05
-        max: 0.45
+        max: 0.55
       z:
         min: 0.10
-        max: 0.35
+        max: 0.45
+    grip_degree: 90.0
     timeout: 4.0
+    stage1:
+      delay: 1.2
+      xy_facing: 0.06
 
   catch:
-    time: 2.0
+    delay: 2.0
     degree: 1.0
   to_box:
     # xyz: [-0.2, 0.0, 0.25]?
-    q_degree: [179.9, 20.0, 135.0]
+    q_degree: [179.9, 10.0, 115.0]
     delay: 1.0
   release:
-    time: 1.5
+    delay: 1.5
     degree: 100
   init:
     gripper_degree: 1.0

@@ -1,11 +1,13 @@
 from fastapi import FastAPI, Depends
 from omegaconf import DictConfig
 import hydra
-from .data_class import Flts
+from .data_class import Flts, PCCommData
 from .find_serial_tty import find_device_by_serial
 import struct
 import serial
 from loguru import logger
+from ctypes import Structure, c_uint32, c_float
+
 
 class MyApp:
     def __init__(self, cfg: DictConfig):
@@ -14,17 +16,23 @@ class MyApp:
 
         self.serial_number = cfg.serial_number
         self.device_path = find_device_by_serial(self.serial_number)
-        self.struct_format = '<ffff'  # Four 32-bit floats
+        self.struct_format = '=IffI'
         # ...
 
     def setup_routes(self):
         @self.app.post("/ttf/")
-        async def ttf(float_list: Flts):
-            assert(len(float_list.flts) == 4)
-            packed = struct.pack(self.struct_format, *float_list.flts)
-            with serial.Serial(self.device_path, baudrate=9600, timeout=1) as ser:
+        async def ttf(data: PCCommData):
+            # assert(len(float_list.flts) == 4)
+            c = data.to_c_struct()
+            packed = struct.pack(self.struct_format,
+                c.SOF,
+                c.vx,
+                c.vw,
+                c.tick
+            )
+            print(packed)
+            with serial.Serial(self.device_path, baudrate=115200, timeout=1) as ser:
                 ser.write(packed)
-                logger.info(f'Data sent, {float_list.flts}')
             return {"message": "ok"}
 
     def run(self, cfg: DictConfig):

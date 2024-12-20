@@ -3,15 +3,18 @@ import cv2
 from dataclasses import dataclass
 import requests
 from loguru import logger
-from typing import List, Optional
+from typing import List, Optional, cast
 from omegaconf import DictConfig
 import hydra
 import time
 from object_tracker2 import ObjectTracker
 from typing import Protocol
 
-from robotoy.fast import to_degrees, to_radians
+from robotoy.fast import to_degrees, to_radians, normalized
+from robotoy.fast.plane import left_dir
+
 from robotoy.time_utils import precise_sleep, precise_wait
+from robotoy.pipe import pipe, unpipe, here, UnpipeAs
 
 def unwrap(value, msg="Unwrap failed - value is None"):
     if value is None:
@@ -38,6 +41,23 @@ class Delay():
             and self.delay is not None\
             and time - self.start_time_sys >= self.delay
 
+class TimerAct:
+    def __init__(self):
+        self.next_act_time = -1e9
+
+    def try_act(self, time, interval, act):
+        if time >= self.next_act_time:
+            act()
+            self.next_act_time = max(time + 0.5 * interval, self.next_act_time + interval)
+
+class OnceAct:
+    def __init__(self):
+        self.done = False
+
+    def try_act(self, act):
+        if not self.done:
+            act()
+            self.done = True
 
 @dataclass
 class ObjPos:
@@ -64,14 +84,14 @@ class Find(State):
             ctx.show_image(img)
 
         if so_xyz is not None:
-            return Position(time.time())
+            return Position()
 
         return self
 
 
 class Position(State):
-    def __init__(self, start_time_sys):
-        self.start_time_sys = start_time_sys
+    def __init__(self):
+        self.delay = Delay()
 
     def execute(self, ctx: "Context") -> "State":
         # [img]
@@ -88,129 +108,146 @@ class Position(State):
             ctx.show_image(img)
 
         # [translation]
-        time_sys = time.time()
-        if so_xyz is not None and time_sys - self.start_time_sys > ctx.cfg.catch.position.time:
-            return GetReady(time.time(), ObjPos(img_time, so_xyz))
-
+        self.delay.try_start(time.time(), ctx.cfg.catch.position.delay)
+        if so_xyz is not None and self.delay.ok(time.time()):
+            return Reach1(ObjPos(img_time, so_xyz))
         return self
 
-# class GetReady(State):
-#     def __init__(self, t, obj_pos: ObjPos):
-#         self.start_time_sys = t
-#         self.obj_pos = obj_pos
-#         self.req_sent = False
-
-#     def execute(self, ctx: "Context") -> "State":
-#         # [grip]
-#         if not self.req_sent:
-#             ctx.req_grip(to_radians(ctx.cfg.catch.get_ready.degree))
-#             self.req_sent = True
-
-#         # [translation]
-#         if time.time() - self.start_time_sys > ctx.cfg.catch.get_ready.time:
-#             return Reach(self.obj_pos)
-#         return self
-
-class Reach(State):
+class Reach1(State):
+    """
+    Calculate final pos and only turn to it, and open the gripper.
+    """
     def __init__(self, obj_pos: ObjPos):
-        self.start_time_sys = time.time()
+        self.obj_pos = obj_pos # don't request in constructor
+        self.obj_tar = None
+        self.reach_tar: Optional[np.ndarray] = None
+        self.stage1_tar = None
+        self.delay = Delay()
 
-        self.obj_pos = obj_pos
-        self.tcp_target_origin: Optional[np.ndarray] = None
-        self.tcp_target_clipped: Optional[np.ndarray] = None
-        self.next_req_time_sys = -1e9
+        self.timer_act = TimerAct()
+        self.once_act = OnceAct()
+
+        self.start_time = time.time()
 
     def execute(self, ctx: "Context") -> "State":
-        if self.tcp_target_origin is None or self.tcp_target_clipped is None:
-            # make sure it's blocked
-            cfg0 = ctx.cfg.catch.reach
+        cfg0 = ctx.cfg.catch.reach
+        if self.reach_tar is None:
             ctx.pub_obj_pos(self.obj_pos.time, *self.obj_pos.xyz)
             obj = unwrap(ctx.get_tf2("base_link", "obj"))[0]
 
-            tcp_xy = obj[:2] + cfg0.offset.xy
-            tcp_xy_norm_clip = np.clip(np.linalg.norm(tcp_xy), cfg0.clip.xy.min, cfg0.clip.xy.max)
-            tcp_xy_clip = tcp_xy / np.linalg.norm(tcp_xy) * tcp_xy_norm_clip
+            tcp_xy = obj[:2] + cfg0.offset.dis
+            left_vec = pipe | tcp_xy | normalized | left_dir | UnpipeAs(np.ndarray)
+            tcp_xy_a_little_left = tcp_xy + cfg0.offset.left * left_vec
+            tcp_xy_clip = normalized(tcp_xy_a_little_left) * np.clip(np.linalg.norm(tcp_xy_a_little_left), cfg0.clip.dis.min, cfg0.clip.dis.max)
             tar_z = obj[2] + cfg0.offset.z
-            tar_z_clip = np.clip(tar_z, cfg0.clip.z.min, cfg0.clip.z.max)
-            # not clipped
-            self.tcp_target_origin = np.array([tcp_xy[0], tcp_xy[1], tar_z])
-            self.tcp_target_clipped = np.array([tcp_xy_clip[0], tcp_xy_clip[1], tar_z_clip])
+            tar_z_clip = pipe | tar_z | (np.clip, cfg0.clip.z.min, cfg0.clip.z.max) | unpipe
 
-        time_sys = time.time()
-        if time_sys - self.start_time_sys > ctx.cfg.catch.reach.timeout:
+            self.obj_tar = pipe | [*tcp_xy_a_little_left, tar_z] | np.array | UnpipeAs(np.ndarray)
+            self.reach_tar = pipe | [tcp_xy_clip[0], tcp_xy_clip[1], tar_z_clip] | np.array | UnpipeAs(np.ndarray)
+
+            self.stage1_tar = np.array([
+                *(
+                    normalized(self.reach_tar[:2]) \
+                    * np.clip(np.linalg.norm(self.reach_tar[:2]) - cfg0.stage1.xy_facing,
+                        cfg0.clip.dis.min,
+                        cfg0.clip.dis.max
+                    )
+                ), self.reach_tar[2]
+            ])
+            logger.warning(f"stage1_tar: {self.stage1_tar}")
+            logger.warning(f"reach_tar: {self.reach_tar}")
+            logger.warning(f"obj_tar: {self.obj_tar}")
+
+        self.once_act.try_act(lambda: ctx.req_grip(to_radians(ctx.cfg.catch.reach.grip_degree)))
+        self.timer_act.try_act(time.time(), ctx.cfg.catch.req_time_interval, lambda: ctx.req_move_xyz(*self.stage1_tar))
+
+        if np.linalg.norm(unwrap(ctx.get_tf2("base_link", "hand_tcp"))[0] - self.stage1_tar) <= ctx.cfg.catch.error.dis:
+            self.delay.try_start(time.time(), cfg0.stage1.delay)
+        if self.delay.ok(time.time()):
+            return Reach2(self.obj_tar, self.reach_tar)
+
+        if time.time() - self.start_time > cfg0.timeout:
             return Init()
-        if time_sys >= self.next_req_time_sys:
-            ctx.req_move_xyz(*self.tcp_target_clipped)
-            interval = ctx.cfg.catch.req_time_interval
-            self.next_req_time_sys = max(time_sys + 0.5 * interval, self.next_req_time_sys + interval)
-        if np.linalg.norm(unwrap(ctx.get_tf2("base_link", "hand_tcp"))[0] - self.tcp_target_origin) <= ctx.cfg.catch.error.xyz:
-            return Catch(time.time())
+
+        # check pos
         return self
 
-class Catch(State):
-    def __init__(self, time_start_sys):
-        self.time_start_sys = time_start_sys
-        self.req_sent = False
+class Reach2(State):
+    def __init__(self, obj_tar: np.ndarray, reach_tar: np.ndarray):
+        self.obj_tar = obj_tar
+        self.reach_tar = reach_tar
+        logger.error(f"reach_tar: {reach_tar}")
+        logger.error(f"obj_tar: {obj_tar}")
+        self.start_time = time.time()
+        self.timer_act = TimerAct()
 
     def execute(self, ctx: "Context") -> "State":
-        if not self.req_sent:
-            ctx.req_grip(to_radians(ctx.cfg.catch.catch.degree))
-            self.req_sent = True
+        self.timer_act.try_act(time.time(), ctx.cfg.catch.req_time_interval, lambda: ctx.req_move_xyz(*self.reach_tar))
+        if np.linalg.norm(unwrap(ctx.get_tf2("base_link", "hand_tcp"))[0] - self.obj_tar) <= ctx.cfg.catch.error.dis:
+            return Catch()
+        if time.time() - self.start_time > ctx.cfg.catch.reach.timeout:
+            return Init()
+        return self
 
-        if time.time() - self.time_start_sys > ctx.cfg.catch.catch.time:
+
+class Catch(State):
+    def __init__(self):
+        self.delay = Delay()
+        self.once_act = OnceAct()
+
+    def execute(self, ctx: "Context") -> "State":
+        self.once_act.try_act(lambda: ctx.req_grip(to_radians(ctx.cfg.catch.catch.degree)))
+        self.delay.try_start(time.time(), ctx.cfg.catch.catch.delay)
+
+        if self.delay.ok(time.time()):
             return ToBox()
 
         return self
 
 class ToBox(State):
     def __init__(self):
-        self.next_req_time_sys = -1e9
+        self.timer_act = TimerAct()
         self.delay = Delay()
 
     def execute(self, ctx: "Context") -> "State":
         time_sys = time.time()
         tar_q = to_radians(np.array(ctx.cfg.catch.to_box.q_degree))
-        if time_sys >= self.next_req_time_sys:
-            ctx.req_waypoint(*tar_q)
-            interval = ctx.cfg.catch.req_time_interval
-            self.next_req_time_sys = max(time_sys + 0.5 * interval, self.next_req_time_sys + interval)
+
+        self.timer_act.try_act(
+            time_sys, ctx.cfg.catch.req_time_interval,
+            lambda: ctx.req_waypoint(*
+                to_radians(np.array(ctx.cfg.catch.to_box.q_degree))
+            )
+        )
+
         logger.warning(f'{ctx.get_q(), tar_q}')
         if np.all(np.abs(unwrap(ctx.get_q()) - tar_q) <= to_radians(ctx.cfg.catch.error.q_degree)):
             self.delay.try_start(time_sys, ctx.cfg.catch.to_box.delay)
         if self.delay.ok(time_sys):
-            return Release(time.time())
+            return Release()
         return self
 
 class Release(State):
-    def __init__(self, time_start_sys):
-        self.time_start_sys = time_start_sys
-        self.req_sent = False
+    def __init__(self):
+        self.once_act = OnceAct()
+        self.delay = Delay()
 
     def execute(self, ctx: "Context") -> "State":
-        if not self.req_sent:
-            ctx.req_grip(to_radians(ctx.cfg.catch.release.degree))
-            self.req_sent = True
-
-        if time.time() - self.time_start_sys > ctx.cfg.catch.release.time:
+        self.once_act.try_act(lambda: ctx.req_grip(to_radians(ctx.cfg.catch.release.degree)))
+        self.delay.try_start(time.time(), ctx.cfg.catch.release.delay)
+        if self.delay.ok(time.time()):
             return Init()
         return self
 
 class Init(State):
     def __init__(self):
-        self.next_req_time_sys = -1e9
-        self.req_sent = False
+        self.once_act = OnceAct()
+        self.timer_act = TimerAct()
 
     def execute(self, ctx: "Context") -> "State":
-        if not self.req_sent:
-            ctx.req_grip(to_radians(ctx.cfg.catch.init.gripper_degree))
-            self.req_sent = True
-
-        time_sys = time.time()
+        self.once_act.try_act(lambda: ctx.req_grip(to_radians(ctx.cfg.catch.init.gripper_degree)))
         tar_q = to_radians(np.array(ctx.cfg.catch.init.q_degree))
-        if time_sys >= self.next_req_time_sys:
-            ctx.req_waypoint(*tar_q)
-            interval = ctx.cfg.catch.req_time_interval
-            self.next_req_time_sys = max(time_sys + 0.5 * interval, self.next_req_time_sys + interval)
+        self.timer_act.try_act(time.time(), ctx.cfg.catch.req_time_interval, lambda: ctx.req_waypoint(*to_radians(np.array(ctx.cfg.catch.init.q_degree))))
 
         if np.all(np.abs(unwrap(ctx.get_q()) - tar_q) <= to_radians(ctx.cfg.catch.error.q_degree)):
             return Find()
@@ -221,7 +258,7 @@ class Context():
     def __init__(self, cfg):
         self.state = Init()
         self.cfg = cfg
-        self.object_tracker = ObjectTracker(480, 640, 30, None, model_name='yolov8m-seg.pt')
+        self.object_tracker = ObjectTracker(480, 640, 30, None, model_name='yolov11m-seg.pt')
 
         self.next_run_time_sys = -1e9
 
@@ -302,18 +339,19 @@ class Context():
         try:
             last = time.time()
             while True:
-                cur = time.time()
-                till = max(cur, last + self.cfg.catch.run_time_interval)
-                precise_sleep(till - cur)
-                last = till
+                try:
+                    cur = time.time()
+                    till = max(cur, last + self.cfg.catch.run_time_interval)
+                    precise_sleep(till - cur)
+                    last = till
 
-                def print_class_info(instance):
-                    logger.info(f"Class name: {instance.__class__.__name__}")
-                    for attr, value in instance.__dict__.items():
-                        logger.info(f"{attr}: {value}")
+                    def print_class_info(instance):
+                        logger.info(f"State class: {instance.__class__.__name__}")
 
-                print_class_info(self.state)
-                self.state = self.state.execute(self)
+                    print_class_info(self.state)
+                    self.state = self.state.execute(self)
+                except Exception as e:
+                    logger.error(f"Error: {e}")
         finally:
             self.object_tracker.stop()
             cv2.destroyAllWindows()

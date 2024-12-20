@@ -9,7 +9,7 @@ tmux send-keys -t my_session:0 "ros2 run roarm_driver roarm_driver" C-m
 tmux split-window -v -t my_session:0
 tmux send-keys -t my_session:0.1 "sleep 3" C-m
 tmux send-keys -t my_session:0.1 "docker exec -u julyfun -it $hash bash" C-m
-tmux send-keys -t my_session:0.1 "ros2 launch roarm_moveit_cmd command_control.launch.py use_rviz:=false" C-m
+tmux send-keys -t my_session:0.1 "ros2 launch roarm_moveit_cmd command_control.launch.py use_rviz:=true" C-m
 
 tmux split-window -h -t my_session:0
 tmux send-keys -t my_session:0.2 "sleep 3" C-m
