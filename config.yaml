@@ -7,7 +7,8 @@ ttf_server:
   port: 4050
 
 catch:
-  labels: ["glove", "cloth"]
+  model_name: "glove2.pt"
+  labels: ["glove"]
   area_min_limit: 0.6
   dev: "135122074193"
   run_time_interval: 0.02
@@ -15,35 +16,36 @@ catch:
   error:
     dis: 0.02
     q_degree: 1.5
-  want_img: false
+  want_img: true
 
   position:
     delay: 1.2
 
   reach:
-    offset: # from observation to tcp you should go
-      dis: 0.05
-      left: 0.015
-      z: -0.01
     clip:
       dis:
         min: 0.05
         max: 0.55
       z:
-        min: 0.10
+        min: -0.15
         max: 0.45
     grip_degree: 90.0
     timeout: 4.0
     stage1:
       delay: 1.2
-      xy_facing: 0.06
+      center: [0.0, 0.0, 0.25]
+      facing: 0.06
+    stage2: # from observation to tcp (stage2) you should go
+      dis: 0.05
+      left: 0.0233
+      z: -0.01
 
   catch:
     delay: 2.0
     degree: 1.0
   to_box:
     # xyz: [-0.2, 0.0, 0.25]?
-    q_degree: [179.9, 10.0, 115.0]
+    q_degree: [179.9, 30.0, 135.0]
     delay: 1.0
   release:
     delay: 1.5
@@ -56,7 +58,7 @@ person:
   labels: ["person"]
   area_min_limit: 0.6
   dev: "112322076960"
-  keep_dis: 0.3
+  keep_dis: 0.6
   max_vx: 0.5
   max_vw_deg: 45.0
   want_img: false

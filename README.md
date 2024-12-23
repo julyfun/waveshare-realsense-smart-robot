@@ -7,7 +7,10 @@
 - [x] Detect the target object and get position in base_link frame
   - [x] track the object
   - [x] kalman filter the position
-- [ ] Auto distinguish two realsense
+- [x] Auto distinguish two realsense
+
+- [ ] Obj on the floor
+- [ ] Locate the obj
 
 ## states
 

@@ -21,6 +21,9 @@ def unwrap(value, msg="Unwrap failed - value is None"):
         raise ValueError(msg)
     return value
 
+def offset_norm(v, offset):
+    return normalized(v) * np.max(np.linalg.norm(v) + offset, 0)
+
 class State(Protocol):
     def execute(self, ctx: "Context") -> "State":
         raise NotImplementedError
@@ -107,15 +110,19 @@ class Position(State):
         if img is not None:
             ctx.show_image(img)
 
+        if so_xyz is not None:
+            ctx.pub_obj_pos(img_time, *so_xyz)
         # [translation]
         self.delay.try_start(time.time(), ctx.cfg.catch.position.delay)
         if so_xyz is not None and self.delay.ok(time.time()):
             return Reach1(ObjPos(img_time, so_xyz))
+
+
         return self
 
 class Reach1(State):
     """
-    Calculate final pos and only turn to it, and open the gripper.
+    Calculate final pos and get close to it, and open the gripper.
     """
     def __init__(self, obj_pos: ObjPos):
         self.obj_pos = obj_pos # don't request in constructor
@@ -135,25 +142,20 @@ class Reach1(State):
             ctx.pub_obj_pos(self.obj_pos.time, *self.obj_pos.xyz)
             obj = unwrap(ctx.get_tf2("base_link", "obj"))[0]
 
-            tcp_xy = obj[:2] + cfg0.offset.dis
-            left_vec = pipe | tcp_xy | normalized | left_dir | UnpipeAs(np.ndarray)
-            tcp_xy_a_little_left = tcp_xy + cfg0.offset.left * left_vec
+            tcp_xy = offset_norm(obj[:2], cfg0.stage2.dis)
+            left_vec = pipe | tcp_xy | normalized | left_dir | unpipe
+            tcp_xy_a_little_left = tcp_xy + cfg0.stage2.left * left_vec
             tcp_xy_clip = normalized(tcp_xy_a_little_left) * np.clip(np.linalg.norm(tcp_xy_a_little_left), cfg0.clip.dis.min, cfg0.clip.dis.max)
-            tar_z = obj[2] + cfg0.offset.z
+            tar_z = obj[2] + cfg0.stage2.z
             tar_z_clip = pipe | tar_z | (np.clip, cfg0.clip.z.min, cfg0.clip.z.max) | unpipe
 
-            self.obj_tar = pipe | [*tcp_xy_a_little_left, tar_z] | np.array | UnpipeAs(np.ndarray)
-            self.reach_tar = pipe | [tcp_xy_clip[0], tcp_xy_clip[1], tar_z_clip] | np.array | UnpipeAs(np.ndarray)
+            self.obj_tar = pipe | [*tcp_xy_a_little_left, tar_z] | np.array | unpipe
+            self.reach_tar = pipe | [tcp_xy_clip[0], tcp_xy_clip[1], tar_z_clip] | np.array | unpipe
 
-            self.stage1_tar = np.array([
-                *(
-                    normalized(self.reach_tar[:2]) \
-                    * np.clip(np.linalg.norm(self.reach_tar[:2]) - cfg0.stage1.xy_facing,
-                        cfg0.clip.dis.min,
-                        cfg0.clip.dis.max
-                    )
-                ), self.reach_tar[2]
-            ])
+            # [get close (stage1)]
+            center_to_reach = self.reach_tar - np.array(cfg0.stage1.center)
+            self.stage1_tar = normalized(center_to_reach) * (np.linalg.norm(center_to_reach) - cfg0.stage1.facing) + np.array(cfg0.stage1.center)
+            logger.warning(f"obj: {obj}")
             logger.warning(f"stage1_tar: {self.stage1_tar}")
             logger.warning(f"reach_tar: {self.reach_tar}")
             logger.warning(f"obj_tar: {self.obj_tar}")
@@ -258,7 +260,7 @@ class Context():
     def __init__(self, cfg):
         self.state = Init()
         self.cfg = cfg
-        self.object_tracker = ObjectTracker(480, 640, 30, cfg.catch.dev, model_name='best.pt')
+        self.object_tracker = ObjectTracker(480, 640, 30, cfg.catch.dev, model_name=cfg.catch.model_name)
 
         self.next_run_time_sys = -1e9
 

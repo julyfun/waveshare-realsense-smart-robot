@@ -36,7 +36,7 @@ class TrackPerson:
                         if cv2.waitKey(1) & 0xFF == ord('q'):
                             break
 
-                    x, y, z = unwrap(so_xyz)
+                    x, y, z = unwrap(so_xyz, msg="Maybe no target.")
 
                     yaw = math.degrees(math.atan2(x, z))
                     pitch = -math.degrees(math.atan2(y, z))
