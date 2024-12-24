@@ -91,6 +91,16 @@ class Find(State):
 
         return self
 
+class V2GetClose(State):
+    def __init__(self):
+        ...
+
+    @staticmethod
+    def obj_close(cfg0, ctx, rs4obj_xyz):
+        rs4tcp_xyz = unwrap(ctx.get_tf2("rs_arm", "hand_tcp"))[0] # this is fixed
+        tcp4obj_xyz = rs4obj_xyz - rs4tcp_xyz
+
+
 
 class Position(State):
     def __init__(self):
@@ -135,6 +145,16 @@ class Reach1(State):
         self.once_act = OnceAct()
 
         self.start_time = time.time()
+
+    # @staticmethod
+    # def _tars_from_tf2(cfg0, ctx):
+    #     ctx.pub_obj_pos(self.obj_pos.time, *self.obj_pos.xyz)
+    #
+    # @staticmethod
+    # def obj_ok(cfg0, ctx, rs4obj_xyz):
+    #     rs4tcp_xyz = unwrap(ctx.get_tf2("rs_arm", "hand_tcp"))[0] # this is fixed
+    #     tcp4obj_xyz = rs4obj_xyz - rs4tcp_xyz
+
 
     def execute(self, ctx: "Context") -> "State":
         cfg0 = ctx.cfg.catch.reach

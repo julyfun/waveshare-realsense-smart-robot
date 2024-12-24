@@ -5,6 +5,7 @@
 .zed
 __pycache__
 .hydra
+*.mp4
 
 # [nn]
 *.pt
@@ -17,4 +18,5 @@ __pycache__
 /docker2
 /outputs
 /docker_mnt*
+/env
 
